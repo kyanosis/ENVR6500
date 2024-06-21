@@ -1,0 +1,389 @@
+---
+title: "Analysis of snowshoe hares"
+author: "Weixuan Chen"
+date: "04/25/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+#attach packages
+library(tidyverse)
+library(here)
+library(janitor)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(ggbeeswarm)
+library(broom)
+library(caret)
+library(e1071)
+library(CatEncoders)
+```
+
+## Import data
+
+```{r, include=FALSE}
+## Read in the data
+# Package ID: knb-lter-bnz.55.22 Cataloging System:https://pasta.edirepository.org.
+# Data set title: Snowshoe hare physical data in Bonanza Creek Experimental Forest: 1999-Present.
+# Data set creator:  Knut Kielland -  
+# Data set creator:  F. Chapin -  
+# Data set creator:  Roger Ruess -  
+# Data set creator:    - Bonanza Creek LTER 
+# Metadata Provider:    - Bonanza Creek LTER 
+# Contact:    - Data Manager Bonanza Creek LTER  - uaf-bnz-im-team@alaska.edu
+# Stylesheet v2.11 for metadata conversion into program: John H. Porter, Univ. Virginia, jporter@virginia.edu 
+
+inUrl1  <- "https://pasta.lternet.edu/package/data/eml/knb-lter-bnz/55/22/f01f5d71be949b8c700b6ecd1c42c701" 
+infile1 <- tempfile()
+try(download.file(inUrl1,infile1,method="curl"))
+if (is.na(file.size(infile1))) download.file(inUrl1,infile1,method="auto")
+
+
+dt1 <-read.csv(infile1,header=F 
+               ,skip=1
+               ,sep=","  
+               ,quot='"' 
+               , col.names=c(
+                 "date",     
+                 "time",     
+                 "grid",     
+                 "trap",     
+                 "l_ear",     
+                 "r_ear",     
+                 "sex",     
+                 "age",     
+                 "weight",     
+                 "hindft",     
+                 "notes",     
+                 "b_key",     
+                 "session_id",     
+                 "study"    ), check.names=TRUE)
+
+unlink(infile1)
+
+# Fix any interval or ratio columns mistakenly read in as nominal and nominal columns read as numeric or dates read as strings
+
+if (class(dt1$date)!="factor") dt1$date<- as.factor(dt1$date)
+if (class(dt1$time)!="factor") dt1$time<- as.factor(dt1$time)
+if (class(dt1$grid)!="factor") dt1$grid<- as.factor(dt1$grid)
+if (class(dt1$trap)!="factor") dt1$trap<- as.factor(dt1$trap)
+if (class(dt1$l_ear)!="factor") dt1$l_ear<- as.factor(dt1$l_ear)
+if (class(dt1$r_ear)!="factor") dt1$r_ear<- as.factor(dt1$r_ear)
+if (class(dt1$sex)!="factor") dt1$sex<- as.factor(dt1$sex)
+if (class(dt1$age)!="factor") dt1$age<- as.factor(dt1$age)
+if (class(dt1$weight)=="factor") dt1$weight <-as.numeric(levels(dt1$weight))[as.integer(dt1$weight) ]               
+if (class(dt1$weight)=="character") dt1$weight <-as.numeric(dt1$weight)
+if (class(dt1$hindft)=="factor") dt1$hindft <-as.numeric(levels(dt1$hindft))[as.integer(dt1$hindft) ]               
+if (class(dt1$hindft)=="character") dt1$hindft <-as.numeric(dt1$hindft)
+if (class(dt1$notes)!="factor") dt1$notes<- as.factor(dt1$notes)
+if (class(dt1$b_key)!="factor") dt1$b_key<- as.factor(dt1$b_key)
+if (class(dt1$session_id)!="factor") dt1$session_id<- as.factor(dt1$session_id)
+if (class(dt1$study)!="factor") dt1$study<- as.factor(dt1$study)
+
+# Convert Missing Values to NA for non-dates
+
+
+
+# Here is the structure of the input data frame:
+str(dt1)                            
+attach(dt1)                            
+# The analyses below are basic descriptions of the variables. After testing, they should be replaced.                 
+
+summary(date)
+summary(time)
+summary(grid)
+summary(trap)
+summary(l_ear)
+summary(r_ear)
+summary(sex)
+summary(age)
+summary(weight)
+summary(hindft)
+summary(notes)
+summary(b_key)
+summary(session_id)
+summary(study) 
+# Get more details on character variables
+
+summary(as.factor(dt1$date)) 
+summary(as.factor(dt1$time)) 
+summary(as.factor(dt1$grid)) 
+summary(as.factor(dt1$trap)) 
+summary(as.factor(dt1$l_ear)) 
+summary(as.factor(dt1$r_ear)) 
+summary(as.factor(dt1$sex)) 
+summary(as.factor(dt1$age)) 
+summary(as.factor(dt1$notes)) 
+summary(as.factor(dt1$b_key)) 
+summary(as.factor(dt1$session_id)) 
+summary(as.factor(dt1$study))
+detach(dt1)               
+
+
+dt1
+```
+
+```{r}
+head(dt1)
+```
+
+# Data Cleaning
+
+```{r}
+snow_hare_df <- dt1 %>% 
+  mutate(date_new = mdy(date)) %>% 
+  mutate(year_new = year(date_new)) %>%
+  group_by(year_new) %>% 
+  filter(age=="1" | age=="1 yr" | age=="a" | age=="A" | age=="a 1 yr." | age=="j" | age=="J") %>% 
+  mutate(sex = case_when(
+    sex == "f" ~ "Female",
+    sex == "f " ~ "Female",
+    sex == "F" ~ "Female",
+    sex == "m" ~ "Male",
+    sex == "m " ~ "Male",
+    sex == "M" ~ "Male",
+    TRUE ~ "Unknown")) %>% 
+  mutate(site =case_when(
+    grid == "bonrip" ~ "Bonanza Riparian",
+    grid == "bonbs" ~ "Bonanza Black Spruce",
+    grid == "Bonbs" ~ "Bonanza Black Spruce",
+    grid == "bonmat" ~ "Bonanza Mature",
+    grid == "bonmat " ~ "Bonanza Mature"))  
+``` 
+
+```{r}
+snow_hare_df_count <- snow_hare_df %>% 
+  group_by(year_new) %>% 
+  filter(age=="1" | age=="1 yr" | age=="a" | age=="A" | age=="a 1 yr." | age=="j" | age=="J") %>% 
+  summarize(count=n())
+```
+
+```{r}
+snow_hare_df_summary <- snow_hare_df_count %>% 
+  summarize(mean_count =mean(count, na.rm = TRUE),
+            median_count =median(count, na.rm = TRUE),
+            max_count = max(count, na.rm=TRUE),
+            min_count = min(count, na.rm =TRUE),
+            sd_count = sd(count, na.rm = TRUE))
+```
+
+## EDA
+
+```{r}
+ggplot(data = snow_hare_df_count, aes(x=year_new, y=count))+
+  geom_col(aes(fill = count))+
+  theme_get()+
+  scale_x_continuous(breaks = c(1999:2012))+
+  labs (x = "Years",
+       y = "Number of Hares",
+       title = "Number of Hares trapped by year",
+       caption = expression(
+         paste(
+           bold("Figure 1: Number of Hares trapped from years 1999 to 2012"))))
+```
+
+```{r}
+snow_hare_df_summary$max_count
+snow_hare_df_summary$min_count
+snow_hare_df_summary$mean_count
+```
+
+```{r}
+ggplot(data = snow_hare_df)+
+  geom_jitter(aes(x=sex, y=weight, color=sex))+
+  facet_wrap(~site)+
+  labs(x = "Sex",
+       y = "Weight(gms)",
+       caption = expression(
+         paste(
+           bold( "Figure 2a: Hares weights by sex trapped at various 
+                 sites from years 1999 to 2012"))))+
+  theme(legend.position = "right",
+        legend.background = element_rect(color = "darkgray"), 
+        plot.caption = element_text(hjust = 0.5))
+```
+
+
+
+```{r}
+ggplot(data = snow_hare_df, aes(x = sex, y=weight)) +
+  geom_beeswarm(aes(color = sex)) +
+  facet_wrap(~site)+
+  scale_color_manual(values = c("cyan3","darkgoldenrod4","darkolivegreen4"))+
+  geom_boxplot(fill = NA, width = 0.2, outlier.color = NA) +
+  stat_summary(fun=mean, 
+               geom="point", 
+               shape=20, 
+               size=4, 
+               color="black", 
+               fill="black") +
+  theme_update()+
+  labs(x = "Sex",
+       y = "Weight(gms)",
+       title = "Hare weights by sex and its mean values, across various grids",
+       caption = expression(
+         paste(
+           bold( "Figure 2b: Average Hares weights by sex trapped at various sites 
+                 from years 1999 to 2012"))))+
+  theme(legend.position = "right",
+        legend.background = element_rect(color = "darkgray"), 
+        plot.caption = element_text(hjust = 0.5))
+```
+
+## Check Normality
+
+```{r}
+ggplot(data = snow_hare_df, aes(x=weight))+
+  geom_histogram(bins=12)+
+  facet_wrap(~sex)
+```
+
+```{r}
+ggplot(data = snow_hare_df, aes(sample=weight)) +
+  geom_qq()+
+  geom_qq_line() +
+  facet_wrap(~sex)
+```
+
+## Aggregate data for t-test
+
+```{r}
+weights_male <- snow_hare_df %>% 
+  filter(sex == "Male") %>% 
+  drop_na(weight) %>% 
+  pull(weight)
+
+weights_female <- snow_hare_df %>% 
+  filter(sex == "Female") %>% 
+  drop_na(weight) %>% 
+  pull(weight)
+
+hist(weights_male)
+qqnorm(weights_male)
+hist(weights_female)
+qqnorm(weights_female)
+```
+
+
+```{r}
+t.test(weights_male, weights_female)
+```
+
+## Perform linear regression
+
+```{r}
+ggplot(data=snow_hare_df, aes(x=hindft, y=weight))+
+  geom_point(color= "pink")+
+  theme_classic()+
+  geom_smooth(method = "lm")+
+  labs(x = "Hind Foot Length in mm",
+       y = "Weight in grams",
+       caption = expression(
+         paste(
+           bold("Figure 3: Weight versus Hind Foot Length of Hares"))))+
+  theme(plot.caption = element_text(hjust = 0.5),
+        plot.background = element_rect(fill = "grey"),
+        panel.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(color = "pink"))
+```
+
+## Model performance
+
+```{r}
+weight_hindft_lm <- lm(weight ~ hindft, data = snow_hare_df)
+
+weight_hindft_lm
+
+weight_hindft_lm_tidy <- tidy(weight_hindft_lm)
+
+weight_hindft_lm_tidy
+
+summary(weight_hindft_lm)
+
+#plot(weight_hindft_lm)
+```
+
+## Machine Learning
+
+```{r}
+snow_hare_df
+snow_hare_ml <- snow_hare_df %>% select(trap, l_ear, r_ear, sex, weight, hindft, b_key, session_id, year_new, site)
+```
+
+```{r}
+library(CatEncoders)
+```
+
+
+```{r}
+snow_hare_ml$l_ear <- as.numeric(snow_hare_ml$l_ear)
+snow_hare_ml$r_ear <- as.numeric(snow_hare_ml$r_ear)
+```
+
+```{r}
+lab_enc = LabelEncoder.fit(snow_hare_ml$sex)
+sex_new = transform(lab_enc, snow_hare_ml$sex)
+snow_hare_ml$sex_new = sex_new
+
+lab_enc = LabelEncoder.fit(snow_hare_ml$b_key)
+b_key_new = transform(lab_enc, snow_hare_ml$b_key)
+snow_hare_ml$b_key_new = b_key_new
+
+lab_enc = LabelEncoder.fit(snow_hare_ml$session_id)
+session_id_new = transform(lab_enc, snow_hare_ml$session_id)
+snow_hare_ml$session_id_new = session_id_new
+
+lab_enc = LabelEncoder.fit(snow_hare_ml$site)
+site_new = transform(lab_enc, snow_hare_ml$site)
+snow_hare_ml$site_new = site_new
+
+lab_enc = LabelEncoder.fit(snow_hare_ml$trap)
+trap_new = transform(lab_enc, snow_hare_ml$trap)
+snow_hare_ml$trap_new = trap_new
+
+snow_hare_ml_tidy <- snow_hare_ml %>% select(trap_new, l_ear, r_ear, weight, hindft, b_key_new, session_id_new, year_new, site_new) %>% drop_na()
+snow_hare_ml_tidy
+```
+
+
+```{r}
+sample <- sample(c(TRUE, FALSE), nrow(snow_hare_ml_tidy), replace=TRUE, prob=c(0.9,0.1))
+train  <- snow_hare_ml_tidy[sample, ]
+test <- snow_hare_ml_tidy[!sample, ]
+y1 <- train$site_new
+X1 <- subset(train, select = -c(site_new))
+y1 <- as.matrix(y1)
+X_train1 <- as.matrix(X1)
+y_train1 <- y1
+X_test1 <- as.matrix(subset(test, select = -c(site_new)))
+y_test1 <- as.matrix(test$site_new)
+tc <- tune.control(cross = 10)
+svmcv.lm1 <- svm(X_train1, y =y_train1, kernel="linear", tunecontrol = tc, scale=FALSE, type="C-classification")
+svmcv.poly1 <- svm(X_train1, y =y_train1, kernel="polynomial", tunecontrol = tc, scale=FALSE, type="C-classification")
+svmcv.radial1 <- svm(X_train1, y =y_train1, kernel="radial", tunecontrol = tc, scale=FALSE, type="C-classification")
+svmcv.sigmoid1 <- svm(X_train1, y =y_train1, kernel="sigmoid", tunecontrol = tc, scale=FALSE, type="C-classification")
+summary(svmcv.lm1)
+summary(svmcv.poly1)
+summary(svmcv.radial1)
+summary(svmcv.sigmoid1)
+```
+
+
+## The result is subjected to change because of the random shuffle of the training and testing sets.
+
+```{r}
+pred1 <- predict(svmcv.lm1, X_test1)
+confusionMatrix(data=as.factor(pred1), reference = as.factor(y_test1))
+
+pred1 <- predict(svmcv.poly1, X_test1)
+confusionMatrix(data=as.factor(pred1), reference = as.factor(y_test1))
+
+pred1 <- predict(svmcv.radial1, X_test1)
+confusionMatrix(data=as.factor(pred1), reference = as.factor(y_test1))
+
+pred1 <- predict(svmcv.sigmoid1, X_test1)
+confusionMatrix(data=as.factor(pred1), reference = as.factor(y_test1))
+```
+
